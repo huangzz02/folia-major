@@ -19,6 +19,7 @@ import { usePlayerOverlayObstacle } from '../hooks/usePlayerOverlayLayout';
 import { resolveLyricSeekMediaTime } from '../utils/lyrics/lyricSeekTime';
 import { HifiProgressRow } from './hifi/HifiBadge';
 import { useIsHifiRoute } from './hifi/useHifiSignalPath';
+import { useSmtcSpotifyStore } from '../services/smtc/smtcSpotifyStore';
 
 export interface TrackNavigation {
     /** 当前曲目的稳定身份，用于识别「确实换歌了」；相邻两首同名时标题字符串不变，不能拿标题判断 */
@@ -153,7 +154,8 @@ const FloatingPlayerControls: React.FC<FloatingPlayerControlsProps> = ({
             : resolvePlayerBottomBarMaxOffset(window.innerHeight)
     ));
 
-    const canAutoExpand = canTogglePlay && duration > 0;
+    const isSmtcPendingSwitch = useSmtcSpotifyStore(state => state.isPendingSwitch);
+    const canAutoExpand = canTogglePlay && duration > 0 && !isSmtcPendingSwitch;
     // 定位模式强制展开：用户要看到的是最终形态的胶囊，而不是一条细进度条。
     const showExpanded = isPositioning || isHovered || (canAutoExpand && playerState !== PlayerState.PLAYING && currentView !== 'home');
 

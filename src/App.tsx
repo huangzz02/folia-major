@@ -127,6 +127,8 @@ import { usePlaybackQueueController } from './components/app/playback/start/useP
 import { usePlaybackTransportController } from './components/app/playback/bridges/usePlaybackTransportController';
 import { useLocalLibraryCatalog } from './hooks/useLocalLibraryCatalog';
 import { usePlaybackVisualizerBridge } from './components/app/playback/bridges/usePlaybackVisualizerBridge';
+import { useSmtcSpotifyBridge } from './components/app/playback/bridges/useSmtcSpotifyBridge';
+import { isSmtcRouteActive, seekSmtcRoute, useSmtcSpotifyStore } from './services/smtc/smtcSpotifyStore';
 import { useLyricReadHead } from './components/app/playback/bridges/useLyricReadHead';
 import { useRandomVisualizerMode } from './hooks/useRandomVisualizerMode';
 import { useObsBrowserSourcePublisher } from './hooks/useObsBrowserSourcePublisher';
@@ -488,11 +490,13 @@ export default function App() {
         lyricStaffMinDwellSeconds,
         lyricStaffAbsorbMode,
         lyricStaffPattern,
+        lyricConvertToTraditional,
         handleSetLyricLineRules,
         handleSetLyricStaffPolicy,
         handleSetLyricStaffMinDwellSeconds,
         handleSetLyricStaffAbsorbMode,
         handleSetLyricStaffPattern,
+        handleToggleLyricConvertToTraditional,
     } = useLyricSettingsStore(useShallow(selectLyricSettingsSnapshot));
     const {
         visualizerMode,
@@ -546,13 +550,20 @@ export default function App() {
             minDwellSeconds: lyricStaffMinDwellSeconds,
             absorbMode: lyricStaffAbsorbMode,
             pattern: lyricStaffPattern,
-        }),
-        [lyricLineRules, lyricStaffPolicy, lyricStaffMinDwellSeconds, lyricStaffAbsorbMode, lyricStaffPattern],
+        }, lyricConvertToTraditional),
+        [lyricLineRules, lyricStaffPolicy, lyricStaffMinDwellSeconds, lyricStaffAbsorbMode, lyricStaffPattern, lyricConvertToTraditional],
     );
     // 保存过滤设置后要用新设置重新铺一遍当前歌词，而此时闭包里的 setLyrics 还是旧的。
     const setLyricsRef = useRef(setLyrics);
     setLyricsRef.current = setLyrics;
     const setLyricsStable = useCallback((nextLyrics: LyricData | null) => setLyricsRef.current(nextLyrics), []);
+
+    useEffect(() => {
+        const currentLyrics = usePlaybackStore.getState().lyrics;
+        if (currentLyrics) {
+            setLyrics(currentLyrics);
+        }
+    }, [lyricConvertToTraditional, setLyrics]);
 
     const handleLyricTimelineOffsetChange = useCallback((offsetMs: number) => {
         setLyricTimelineOffsetMs(offsetMs);
@@ -1144,13 +1155,14 @@ export default function App() {
 
     // mpv is not one of the two decks a blend needs: off while this song or the next one plays on HiFi.
     const hifiBlocksAutomix = useHifiAutomixGate();
+    const isSmtcActive = useSmtcSpotifyStore(state => state.active);
     const automix = useAutomixDecks({
         audioRef,
         audioContextRef,
         currentSongKeyRef: currentSongRef,
         coverUrl,
         loopMode: effectiveLoopMode,
-        isEnabled: automixEnabled && !isNowPlayingStageActive && !hifiBlocksAutomix,
+        isEnabled: automixEnabled && !isNowPlayingStageActive && !hifiBlocksAutomix && !isSmtcActive,
         transition: transitionSettings,
         onAdvanceTrack: () => {
             // Same advance the end of a track would trigger, only early enough for the outgoing
@@ -1215,6 +1227,7 @@ export default function App() {
     // change that visibly happened and then visibly un-happened, while the title never moved.
     const getDisplayElement = automix.getDisplayElement;
     useEffect(() => {
+        if (isSmtcRouteActive()) return;
         const element = isShowingTail ? getDisplayElement() : audioRef.current;
         if (element) currentTime.set(element.currentTime);
     }, [audioRef, currentTime, getDisplayElement, isShowingTail]);
@@ -1529,6 +1542,16 @@ export default function App() {
         incomingLyricTimelineOffsetMs,
     });
 
+    useSmtcSpotifyBridge({
+        audioRef,
+        setLyrics: setLyricsStable,
+        setIsLyricsLoading,
+        restoreCachedThemeForSong,
+        handleNextTrack,
+        isNowPlayingStageActive,
+        isPlayerCapStageActive,
+    });
+
     const {
         togglePlay,
         toggleLoop,
@@ -1635,6 +1658,7 @@ export default function App() {
         duration,
         playbackRoute,
         hasHifiTrack,
+        isSmtcActive,
     }), [
         activePlaybackContext,
         audioSrc,
@@ -1646,6 +1670,7 @@ export default function App() {
         hidePlayerRightPanelButton,
         hidePlayerTranslationSubtitle,
         isNowPlayingControlDisabled,
+        isSmtcActive,
         playbackRoute,
         stageActiveEntryKind,
     ]);
@@ -2014,6 +2039,7 @@ export default function App() {
     seekDuringTransitionRef.current = (time: number) => {
         // HiFi route: mpv seeks. Arrow keys and the remote seek mpv before this, so it is seekMainAudio's and resumes.
         if (seekHifiRoute(time, { resume: true })) return true;
+        if (seekSmtcRoute(time, { resume: true })) return true;
         const tailElement = cancelBlendToDisplayedTrack(true);
         if (!tailElement) return false;
         const seekTarget = Math.max(0, time);
@@ -2510,6 +2536,8 @@ export default function App() {
                 if (consumeProgrammaticPause(e.currentTarget)) return;
                 // The Web engine yielding to mpv pauses the deck: the HiFi song's autoplay intent stays.
                 if (isHifiRoute()) return;
+                // Spotify / SMTC route handles its own transport: the web audio deck pausing must not pause SMTC playback
+                if (isSmtcRouteActive()) return;
                 if (!automix.isActiveDeck(e.currentTarget)) return;
                 // A deck whose source failed fires `pause` immediately AFTER `error` - Chromium
                 // clears the play state as part of failing the load - and that is not the listener

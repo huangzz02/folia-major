@@ -31,7 +31,9 @@ import type { AudioQualityPreference, MediaId } from '../../../../types/onlineMu
 import { omni } from '../../../../services/onlineMusic/omni';
 import { onlineFailureOf, type OnlineFailure } from '../../../../services/onlineMusic/failure/onlineFailureCase';
 import { getCachedSongCoverUrl, getSongCacheWithLegacyMigration } from '../../../../services/onlineMusic/resourceCache';
-import { getSongCoverUrl } from '../../../../services/onlineMusic/songMetadata';
+import { getSongAlbumLabel, getSongArtistLabel, getSongCoverUrl } from '../../../../services/onlineMusic/songMetadata';
+import { loadSmtcAndSpotifyLyrics } from '../../../../services/smtc/smtcLyricsMatcher';
+import { activatePassiveSmtcTrack, isSmtcSpotifySupported, isSpotifyPremiumSynchronous } from '../../../../services/smtc/smtcSpotifyStore';
 import { useOnlineProviderAccountStore } from '../../../../stores/useOnlineProviderAccountStore';
 import { setStatusMessage as setStatusMsg, useStatusMessageStore } from '../../../../stores/useStatusMessageStore';
 import { setActiveLocalLyricsSource, setAudioSrc, setCachedCoverUrl, setCurrentSong, usePlaybackStore } from '../../../../stores/usePlaybackStore';
@@ -374,6 +376,48 @@ const restoreSourceForSong = async (
             if (!prev || !isSamePlaybackSong(prev, song)) return prev;
             return { ...prev, onlineLyricsState };
         });
+    }
+
+    if (getOnlineProviderIdForSong(song) === 'spotify' && isSmtcSpotifySupported() && !isSpotifyPremiumSynchronous()) {
+        replaceBlobUrl(blobUrlRef, null);
+        currentOnlineAudioUrlFetchedAtRef.current = null;
+        setAudioSrc(null);
+        const startSec = takeResumeTime(pendingResumeTimeRef);
+        activatePassiveSmtcTrack(song, startSec);
+
+        const remoteCover = getSongCoverUrl(song);
+        if (!rememberedCoverUrl && remoteCover) {
+            setCachedCoverUrl(remoteCover);
+        }
+
+        try {
+            await loadSmtcAndSpotifyLyrics({
+                song,
+                title: song.name,
+                artist: getSongArtistLabel(song),
+                album: getSongAlbumLabel(song),
+                durationMs: song.durationMs || 0,
+                isCurrent: () => !overtaken(),
+                onLyrics: resolved => setLyrics(resolved),
+                onPureMusicChange: isPureMusic => {
+                    setCurrentSong(prev => {
+                        if (!prev || !isSamePlaybackSong(prev, song)) return prev;
+                        return { ...prev, isPureMusic };
+                    });
+                },
+                onStateChange: state => {
+                    setCurrentSong(prev => {
+                        if (!prev || !isSamePlaybackSong(prev, song)) return prev;
+                        return { ...prev, onlineLyricsState: state ?? undefined };
+                    });
+                },
+            });
+        } catch (error) {
+            if (overtaken()) return 'stale';
+            console.warn('[restorePlaybackSourceForSong] SMTC Spotify lyrics restore failed:', error);
+        }
+
+        return overtaken() ? 'stale' : 'restored';
     }
 
     if (!omni.canPlaySong(song)) {

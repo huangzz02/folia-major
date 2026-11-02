@@ -5,6 +5,8 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { SongResult, LyricData, Line } from '../../../types';
 import { findLatestActiveLineIndex } from '../../../utils/appPlaybackHelpers';
 import { fetchLyricsForMatchSource } from '../../../utils/lyrics/lyricMatchSources';
+import { convertLyricsToTraditional } from '../../../utils/lyrics/chineseConverter';
+import { useLyricSettingsStore } from '../../../stores/useLyricSettingsStore';
 import type { LyricMatchSource } from '../../../utils/lyrics/matchResult';
 
 // src/components/modal/lyric-match/LyricPreviewPanel.tsx
@@ -125,7 +127,8 @@ export const LyricPreviewPanel: React.FC<LyricPreviewPanelProps> = ({
                 if (isCancelled) return;
 
                 if (processed && processed.lyrics) {
-                    setLyricData(processed.lyrics);
+                    const shouldConvert = useLyricSettingsStore.getState().lyricConvertToTraditional;
+                    setLyricData(shouldConvert ? convertLyricsToTraditional(processed.lyrics) : processed.lyrics);
                 } else if (processed && processed.isPureMusic) {
                     setLyricData({
                         lines: [

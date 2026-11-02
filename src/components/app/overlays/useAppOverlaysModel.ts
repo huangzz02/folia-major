@@ -9,6 +9,7 @@ import { useThemeSettingsStore } from '../../../stores/useThemeSettingsStore';
 import { useStageSettingsStore } from '../../../stores/useStageSettingsStore';
 import { usePlayerChromeSettingsStore } from '../../../stores/usePlayerChromeSettingsStore';
 import { useTranslation } from 'react-i18next';
+import { PlayerState } from '../../../types';
 import {
     selectDisplayCoverUrl,
     selectDisplayDuration,
@@ -19,6 +20,7 @@ import {
 } from '../../../stores/usePlaybackStore';
 import { resolveLikeAvailability } from '../../../utils/playerLikeAvailability';
 import { canShuffleQueue } from '../../../utils/playbackNeighbors';
+import { useSmtcSpotifyStore } from '../../../services/smtc/smtcSpotifyStore';
 import { buildAppOverlaysModel, type AppOverlaysDeps, type AppOverlaysModel } from './buildAppOverlaysModel';
 
 // src/components/app/overlays/useAppOverlaysModel.ts
@@ -59,6 +61,9 @@ export const useAppOverlaysModel = (deps: AppOverlaysDeps): AppOverlaysModel => 
     const displayCoverUrl = usePlaybackStore(selectDisplayCoverUrl);
     const displayDuration = usePlaybackStore(selectDisplayDuration);
     const displayPlayerState = usePlaybackStore(selectDisplayPlayerState);
+    const isSmtcActive = useSmtcSpotifyStore(state => state.active);
+    const isSmtcPending = useSmtcSpotifyStore(state => state.isPendingSwitch);
+    const effectivePlayerState = isSmtcPending ? PlayerState.PLAYING : displayPlayerState;
     const playerControlSlotContext = useMemo(() => ({
         onShuffle: deps.shuffleQueue,
         canShuffle: canShuffleQueue(playQueue.length, isFmMode, deps.isNowPlayingStageActive),
@@ -96,7 +101,7 @@ export const useAppOverlaysModel = (deps: AppOverlaysDeps): AppOverlaysModel => 
         currentTime,
         lyricCurrentTime,
         currentSong: displaySong,
-        playerState: displayPlayerState,
+        playerState: effectivePlayerState,
         duration: displayDuration,
         audioSrc,
         lyrics: displayLyrics,
@@ -118,6 +123,7 @@ export const useAppOverlaysModel = (deps: AppOverlaysDeps): AppOverlaysModel => 
         playerControlSlotSecondary,
         playerControlSlotContext,
         onCommitPlayerBottomBarOffset: handleSetPlayerBottomBarOffset,
+        isSmtcActive,
         // Spread rather than `deps`: the caller passes an object literal, so depending on the object
         // itself would rebuild this on every render and defeat the memo entirely. The key set is
         // fixed by the call site, so the array keeps a constant length.
@@ -146,6 +152,7 @@ export const useAppOverlaysModel = (deps: AppOverlaysDeps): AppOverlaysModel => 
         playerControlSlotSecondary,
         playerControlSlotContext,
         handleSetPlayerBottomBarOffset,
+        isSmtcActive,
         t,
     ]);
 };

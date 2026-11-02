@@ -18,6 +18,24 @@ import { getStoredBoolean, getStoredString, removeStoredKey, setStoredBoolean, s
 import { setStatusMessage } from './useStatusMessageStore';
 
 export const GLOBAL_LYRIC_TIMELINE_OFFSET_STORAGE_KEY = 'global_lyric_timeline_offset_ms';
+export const LYRIC_CONVERT_TO_TRADITIONAL_STORAGE_KEY = 'lyric_convert_to_traditional';
+
+const isSystemLanguageTraditionalChinese = (): boolean => {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+        return false;
+    }
+    const languages = navigator.languages ?? [navigator.language];
+    return languages.some(lang => {
+        if (!lang) return false;
+        const lowered = lang.toLowerCase();
+        return (
+            lowered === 'zh-tw' ||
+            lowered === 'zh-hk' ||
+            lowered === 'zh-mo' ||
+            lowered.includes('hant')
+        );
+    });
+};
 
 // Device-local audio/visual latency compensation (Bluetooth headphones and the like). Deliberately
 // NOT part of the synced visual config: the right value belongs to this machine's output path.
@@ -128,12 +146,14 @@ export type LyricSettingsState = {
     localLyricFormatOrder: LocalLyricFileFormat[];
     globalLyricTimelineOffsetMs: number;
     lyricLineRules: LyricLineRule[];
+    lyricConvertToTraditional: boolean;
     // 开头制作人员信息的处理策略，与上面的通用逐行过滤是两套独立机制。
     lyricStaffPolicy: LyricStaffPolicy;
     lyricStaffMinDwellSeconds: number;
     lyricStaffAbsorbMode: LyricStaffAbsorbMode;
     lyricStaffPattern: string;
     handleToggleAutoUseBestLyric: (enable: boolean) => void;
+    handleToggleLyricConvertToTraditional: (enable: boolean) => void;
     handleSetPreferredAlternativeLyricSource: (source: LyricProviderSource) => void;
     handleSetLocalLyricsPriority: (priority: LocalLyricsPriority) => void;
     handleSetLocalLyricFormatOrder: (order: LocalLyricFileFormat[]) => void;
@@ -156,12 +176,21 @@ export const useLyricSettingsStore = create<LyricSettingsState>((set, get) => ({
     lyricStaffMinDwellSeconds: readStoredLyricStaffMinDwellSeconds(),
     lyricStaffAbsorbMode: readStoredLyricStaffAbsorbMode(),
     lyricStaffPattern: getStoredString('lyrics_staff_pattern', ''),
+    lyricConvertToTraditional: getStoredBoolean(LYRIC_CONVERT_TO_TRADITIONAL_STORAGE_KEY, isSystemLanguageTraditionalChinese()),
     handleToggleAutoUseBestLyric: (enable) => {
         setStoredBoolean('auto_use_best_lyric', enable);
         set({ autoUseBestLyric: enable });
         setStatusMessage({
             type: 'info',
             text: i18n.t('notifications.' + (enable ? 'autoBestLyricOn' : 'autoBestLyricOff')),
+        });
+    },
+    handleToggleLyricConvertToTraditional: (enable) => {
+        setStoredBoolean(LYRIC_CONVERT_TO_TRADITIONAL_STORAGE_KEY, enable);
+        set({ lyricConvertToTraditional: enable });
+        setStatusMessage({
+            type: 'info',
+            text: i18n.t('notifications.' + (enable ? 'lyricConvertToTraditionalOn' : 'lyricConvertToTraditionalOff')),
         });
     },
     handleSetPreferredAlternativeLyricSource: (source) => {
@@ -265,7 +294,9 @@ export const selectLyricSettingsSnapshot = (state: LyricSettingsState) => ({
     lyricStaffMinDwellSeconds: state.lyricStaffMinDwellSeconds,
     lyricStaffAbsorbMode: state.lyricStaffAbsorbMode,
     lyricStaffPattern: state.lyricStaffPattern,
+    lyricConvertToTraditional: state.lyricConvertToTraditional,
     handleToggleAutoUseBestLyric: state.handleToggleAutoUseBestLyric,
+    handleToggleLyricConvertToTraditional: state.handleToggleLyricConvertToTraditional,
     handleSetPreferredAlternativeLyricSource: state.handleSetPreferredAlternativeLyricSource,
     handleSetLocalLyricsPriority: state.handleSetLocalLyricsPriority,
     handleSetLocalLyricFormatOrder: state.handleSetLocalLyricFormatOrder,

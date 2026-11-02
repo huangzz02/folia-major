@@ -77,6 +77,7 @@ const { createYtmSandbox } = require('./ytm/sandbox.cjs');
 const { YTM_AUDIO_PRIVILEGED_SCHEME, YTM_AUDIO_SCHEME } = require('./ytm/audio.cjs');
 const { createSpotifyApiBridge } = require('./spotify/spotifyApiBridge.cjs');
 const { SPOTIFY_AUDIO_PRIVILEGED_SCHEME, SPOTIFY_AUDIO_SCHEME } = require('./spotify/audio.cjs');
+const { createSmtcBridge } = require('./smtc/smtcBridge.cjs');
 const { createQqAuthSessionRepository } = require('./qq/qqAuthSessionRepository.cjs');
 const { DEFAULT_DISCORD_APPLICATION_ID, createDiscordPresenceController } = require('./discordPresence.cjs');
 const { createVoiceInputPauseMonitor } = require('./voiceInputPause.cjs');
@@ -406,6 +407,20 @@ const spotifyApiBridge = createSpotifyApiBridge({ store, safeStorage,
   audioDirectory: () => path.join(getConfiguredCacheDirectory(), 'spotify'),
   onAudioKept: limitBytes => pruneMediaCache(limitBytes),
 });
+const smtcBridge = createSmtcBridge({
+  openExternal: url => shell.openExternal(url),
+  fetch: (url, options) => electronNet.fetch(url, options),
+  getFocusWindow: () => mainWindow,
+  broadcast: (status) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('smtc:status-update', status);
+    }
+    if (remoteControlWindow && !remoteControlWindow.isDestroyed()) {
+      remoteControlWindow.webContents.send('smtc:status-update', status);
+    }
+  },
+});
+process.on('exit', () => smtcBridge.dispose());
 const qqAuthSessionRepository = createQqAuthSessionRepository({ store, safeStorage });
 // AI API keys are sealed with safeStorage instead of sitting in config.json as plaintext, and never
 // leave the main process: the renderer only sees AI_API_KEYS_CONFIGURED (#586).
@@ -483,6 +498,7 @@ const exitAfterAskingStorageWritten = (code, what) => {
     console.error(`[Wallpaper] Failed to ask for the pages' storage to be written before the ${what}`, error);
   }
   hifiSession.killSync();
+  smtcBridge.dispose();
   app.exit(code);
 };
 
@@ -6161,6 +6177,7 @@ app.whenReady().then(async () => {
   }
   createWindow();
   focusMainWindow();
+  smtcBridge.start();
   if (process.env.FOLIA_PENDING_DESKTOP_LYRIC === '1') {
     delete process.env.FOLIA_PENDING_DESKTOP_LYRIC;
     if (!isWallpaperModeEnabled()) {
@@ -6380,6 +6397,7 @@ app.on('before-quit', (event) => {
   isQuitHeldForAccounts = false;
   transcodeService.dispose();
   hifiSession.killSync();
+  smtcBridge.dispose();
   // An mpv download the quit cuts off is stopped: its partial files go now if there is time, or
   // with the installer's sweep of leftovers next time.
   hifiInstaller.cancel();
@@ -7087,6 +7105,22 @@ ipcMain.handle('spotify-api-request', (event, operation, params) => {
     return { ok: false, error: { code: 'unavailable', message: 'Untrusted Spotify request' } };
   }
   return spotifyApiBridge.request(operation, params);
+});
+ipcMain.handle('smtc:get-status', (event) => {
+  if (!isFirstPartyWindowContents(event)) return null;
+  return smtcBridge.getStatus();
+});
+ipcMain.handle('smtc:control', (event, command) => {
+  if (!isFirstPartyWindowContents(event)) return { ok: false, reason: 'untrusted' };
+  return smtcBridge.control(command);
+});
+ipcMain.handle('smtc:play-spotify-uri', (event, uri) => {
+  if (!isFirstPartyWindowContents(event)) return { ok: false, reason: 'untrusted' };
+  return smtcBridge.playSpotifyUri(uri);
+});
+ipcMain.handle('smtc:fetch-lrclib', (event, query) => {
+  if (!isFirstPartyWindowContents(event)) return { ok: false, data: null };
+  return smtcBridge.fetchLrclib(query);
 });
 
 ipcMain.handle('window-minimize', () => {

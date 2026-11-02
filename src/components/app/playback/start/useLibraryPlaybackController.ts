@@ -12,6 +12,7 @@ import { retireBlobUrl } from '../../../../services/playbackBlobUrls';
 import type { ThemeCacheSongKey } from '../../../../services/themeCache';
 import { hasRenderableLyrics } from '../../../../utils/appPlaybackHelpers';
 import {
+    getOnlineProviderIdForSong,
     isLocalPlaybackSong,
     isNavidromePlaybackSong,
     isSamePlaybackSong,
@@ -31,7 +32,9 @@ import { getPlatformLyricSource } from '../../../../utils/lyrics/lyricSources';
 import { resolveExplicitFileTimedLyricFormat } from '../../../../utils/lyrics/formatDetection';
 import { applyUploadedLocalLyrics } from '../../../../utils/lyrics/localLyricsUpload';
 import { omni } from '../../../../services/onlineMusic/omni';
-import { getProviderSongMetadata } from '../../../../services/onlineMusic/songMetadata';
+import { getProviderSongMetadata, getSongAlbumLabel, getSongArtistLabel } from '../../../../services/onlineMusic/songMetadata';
+import { loadSmtcAndSpotifyLyrics } from '../../../../services/smtc/smtcLyricsMatcher';
+import { deactivateSmtc, isSmtcSpotifySupported } from '../../../../services/smtc/smtcSpotifyStore';
 import { getSongResourceCacheKey } from '../../../../services/onlineMusic/resourceKeys';
 import { getSongCacheWithLegacyMigration } from '../../../../services/onlineMusic/resourceCache';
 import { getProviderCacheKey } from '../../../../services/onlineMusic/providerStorage';
@@ -389,6 +392,22 @@ export function useLibraryPlaybackController({
 
         const prefetched = getPrefetchedData(onlineSong, audioQuality);
         if (prefetched?.lyrics) return prefetched.lyrics;
+
+        if (getOnlineProviderIdForSong(onlineSong) === 'spotify' && isSmtcSpotifySupported()) {
+            let matched: LyricData | null = null;
+            await loadSmtcAndSpotifyLyrics({
+                song: onlineSong,
+                title: onlineSong.name,
+                artist: getSongArtistLabel(onlineSong),
+                album: getSongAlbumLabel(onlineSong),
+                durationMs: onlineSong.durationMs || 0,
+                isCurrent: () => true,
+                onLyrics: next => {
+                    matched = next;
+                },
+            });
+            return matched ?? fallbackLyrics;
+        }
 
         return (await omni.getLyrics(onlineSong, { userId })).lyrics ?? fallbackLyrics;
     }, [audioQuality, lyrics, userId]);
@@ -754,6 +773,7 @@ export function useLibraryPlaybackController({
             retireBlobUrl(null);
         }
 
+        deactivateSmtc({ pauseExternal: true });
         shouldAutoPlayRef.current = start.autoplay;
         askForSong(initialMeta.unifiedSong);
         // A new song starts at its beginning: a time to resume at was left for another song. A play
@@ -1095,6 +1115,7 @@ export function useLibraryPlaybackController({
             // The HiFi route looks for no copy the browser can play: mpv decodes every format itself.
             const recoveredRepresentation = onHifi ? null : audio.recoveredCopy(unifiedSong);
 
+            deactivateSmtc({ pauseExternal: true });
             shouldAutoPlayRef.current = start.autoplay;
             askForSong(unifiedSong);
             // A new song starts at its beginning: a time to resume at was left for another song. A play

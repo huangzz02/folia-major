@@ -1147,6 +1147,66 @@ declare global {
         onInstallProgress: (callback: (progress: import('./types/hifi').HifiInstallProgress) => void) => () => void;
         onReadRequest: (callback: (request: import('./types/hifi').HifiReadRequest) => void) => () => void;
       };
+      smtc?: {
+        isSupported: boolean;
+        getStatus: () => Promise<{
+          hasSession: boolean;
+          appId: string;
+          title: string;
+          artist: string;
+          album: string;
+          duration: number;
+          position: number;
+          isPlaying: boolean;
+          playbackStatus: string;
+          thumbnail: string | null;
+          timestamp: number;
+        } | null>;
+        control: (command: {
+          action: 'play' | 'pause' | 'toggle' | 'next' | 'prev' | 'previous' | 'seek' | 'refresh' | 'play_track';
+          positionMs?: number;
+          resume?: boolean;
+          uri?: string;
+          title?: string;
+          titleAlt?: string;
+          artist?: string;
+        }) => Promise<{ ok: boolean; reason?: string }>;
+        playSpotifyUri: (
+          input: string | { uri: string; title?: string; titleAlt?: string; artist?: string }
+        ) => Promise<{ ok: boolean; reason?: string }>;
+        fetchLrclib: (query: {
+          title: string;
+          artist?: string;
+          album?: string;
+          durationSec?: number;
+        }) => Promise<{
+          ok: boolean;
+          data: {
+            id: number | null;
+            trackName: string;
+            artistName: string;
+            duration: number;
+            instrumental: boolean;
+            syncedLyrics: string | null;
+            plainLyrics: string | null;
+          } | null;
+        }>;
+        onStatusUpdate: (
+          callback: (status: {
+            hasSession: boolean;
+            appId: string;
+            title: string;
+            artist: string;
+            album: string;
+            duration: number;
+            position: number;
+            isPlaying: boolean;
+            playbackStatus: string;
+            thumbnail: string | null;
+            timestamp: number;
+          }) => void,
+        ) => () => void;
+      };
     };
   }
 }

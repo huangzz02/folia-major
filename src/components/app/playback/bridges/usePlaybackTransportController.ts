@@ -13,6 +13,7 @@ import type { OnlineFailure } from '../../../../services/onlineMusic/failure/onl
 import { onlineFailureToast } from '../source/onlineFailureToast';
 import { hifiTransport, isHifiRoute } from '../../../../services/hifi/hifiPlayback';
 import { resumeHifiPlayback } from '../../../hifi/hifiRouteTransport';
+import { isSmtcRouteActive, smtcPause, smtcPlay } from '../../../../services/smtc/smtcSpotifyStore';
 
 // src/components/app/playback/bridges/usePlaybackTransportController.ts
 
@@ -88,6 +89,12 @@ export function usePlaybackTransportController({
         // queue ended (mpv was stopped) goes through playSong, which writes the state itself.
         if (isHifiRoute()) {
             if (resumeHifiPlayback()) setPlayerState(PlayerState.PLAYING);
+            return;
+        }
+
+        if (isSmtcRouteActive()) {
+            setPlayerState(PlayerState.PLAYING);
+            void smtcPlay();
             return;
         }
 
@@ -212,6 +219,12 @@ export function usePlaybackTransportController({
         // Before the fade logic: the fade graph belongs to the Web Audio route, and mpv pauses at once.
         if (isHifiRoute()) {
             void hifiTransport.pause();
+            setPlayerState(PlayerState.PAUSED);
+            return;
+        }
+
+        if (isSmtcRouteActive()) {
+            void smtcPause();
             setPlayerState(PlayerState.PAUSED);
             return;
         }

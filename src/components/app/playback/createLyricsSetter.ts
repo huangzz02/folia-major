@@ -12,6 +12,7 @@ import { applyDetectedChorusEffects, applyChorusRangesByTime } from '../../../ut
 import type { ChorusRange } from '../../../utils/lyrics/chorusEffects';
 import { getPlaybackSongKey } from '../../../utils/appPlaybackGuards';
 import { applyLyricsTransform, lyricsForNoLyrics, untransformedLyrics } from '../../../services/hostExtensionHooks';
+import { convertLyricsToTraditional } from '../../../utils/lyrics/chineseConverter';
 import { setLyricsState as setPlaybackLyrics, usePlaybackStore } from '../../../stores/usePlaybackStore';
 
 // src/components/app/playback/createLyricsSetter.ts
@@ -45,6 +46,7 @@ export const createLyricsSetter = (
     lyricLineRules: readonly LyricLineRule[],
     currentSongFullRef?: MutableRefObject<SongResult | null>,
     staffOptions?: LyricStaffPolicyOptions,
+    convertToTraditional?: boolean,
 ) => {
     let lastSongId: number | string | null = null;
     let cachedNeteaseChorusRanges: ChorusRange[] | null = null;
@@ -70,6 +72,9 @@ export const createLyricsSetter = (
             ? null
             : applyLyricStaffPolicy(applyLyricLineRules(nextLyrics, compiledLineRules), staffOptions);
         if (processed) {
+            if (convertToTraditional) {
+                processed = convertLyricsToTraditional(processed);
+            }
             const hasChorus = processed.lines.some(line => line.isChorus);
             if (hasChorus) {
                 // Cache the chorus ranges from the incoming lyrics (e.g. NetEase lyrics)

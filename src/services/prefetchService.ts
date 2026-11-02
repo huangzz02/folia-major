@@ -30,6 +30,8 @@ import { useAudioSettingsStore } from '../stores/useAudioSettingsStore';
 import { onlineFailureOf } from './onlineMusic/failure/onlineFailureCase';
 import { noteOnlineRequestCooldown, onlineRequestCooldown } from './onlineMusic/failure/onlineRequestCooldown';
 import { usePlaybackStore } from '../stores/usePlaybackStore';
+import { loadSmtcAndSpotifyLyrics } from './smtc/smtcLyricsMatcher';
+import { isSmtcSpotifySupported, isSpotifyPremiumSynchronous } from './smtc/smtcSpotifyStore';
 
 // Prefetch configuration
 //
@@ -236,6 +238,9 @@ export const resolvePrefetchAudioUrl = async (
 ): Promise<PrefetchedAudioUrl | null> => {
     const sourceRef = getPlaybackSourceRef(song);
     const providerId = sourceRef.kind === 'online' ? sourceRef.providerId : undefined;
+    if (providerId === 'spotify' && isSmtcSpotifySupported() && !isSpotifyPremiumSynchronous()) {
+        return null;
+    }
     try {
         // A copy fetched at another level than the one asked for does not count: playback will
         // pass it over, so the song gets a URL here like one with no copy.
@@ -294,6 +299,7 @@ const prefetchSong = async (
         return;
     }
 
+    const isSmtcSpotify = sourceRef.providerId === 'spotify' && isSmtcSpotifySupported() && !isSpotifyPremiumSynchronous();
     const songId = song.id;
     const songKey = getPrefetchSongKey(song);
 
@@ -305,10 +311,13 @@ const prefetchSong = async (
   const currentSettingsLyricSettings = useLyricSettingsStore.getState();
     const lyricPreferenceMatches = !currentSettingsLyricSettings.autoUseBestLyric
         || existing?.lyricPreferenceSource === currentSettingsLyricSettings.preferredAlternativeLyricSource;
-    if (existing && lyricPreferenceMatches && existing.audioUrl && isUrlValid(existing.audioUrlFetchedAt) && (existing.lyrics || existing.lyricRaw?.isPureMusic)) {
+    const hasValidPrefetchedAudio = isSmtcSpotify || Boolean(existing?.audioUrl && isUrlValid(existing.audioUrlFetchedAt));
+    if (existing && lyricPreferenceMatches && hasValidPrefetchedAudio && (existing.lyrics || existing.lyricRaw?.isPureMusic)) {
         console.log(`[Prefetch] Already cached: ${song.name}`);
         touchPrefetchCacheEntry(songKey, existing);
-        analyseForAutomix(song, existing.audioUrl);
+        if (!isSmtcSpotify) {
+            analyseForAutomix(song, existing.audioUrl);
+        }
         return;
     }
 
@@ -328,7 +337,7 @@ const prefetchSong = async (
     };
 
     // Prefetch audio URL (if not cached or expired)
-    if (!data.audioUrl) {
+    if (!data.audioUrl && !isSmtcSpotify) {
         const resolved = await resolvePrefetchAudioUrl(song, audioQuality, signal);
         if (resolved) {
             data.audioUrl = resolved.audioUrl;
@@ -353,6 +362,31 @@ const prefetchSong = async (
                 // The same stamp the fetched path leaves below. Without it a track whose lyrics came
                 // from the cache can never satisfy the "already cached" test at the top of this
                 // function, so every prefetch pass re-enters the whole thing for it.
+                data.lyricPreferenceSource = currentSettingsLyricSettings.autoUseBestLyric
+                    ? currentSettingsLyricSettings.preferredAlternativeLyricSource
+                    : null;
+            } else if (isSmtcSpotify && !signal.aborted) {
+                const metadata = getProviderSongMetadata(song);
+                const artistName = metadata.artists.map(a => a.name).join(', ');
+                await loadSmtcAndSpotifyLyrics({
+                    song,
+                    title: song.name,
+                    artist: artistName,
+                    album: metadata.album?.name,
+                    durationMs: metadata.durationMs,
+                    isCurrent: () => !signal.aborted,
+                    onLyrics: resolvedLyrics => {
+                        data.lyrics = resolvedLyrics;
+                    },
+                    onPureMusicChange: isPureMusic => {
+                        data.lyricRaw = {
+                            mainLrc: null,
+                            yrcLrc: null,
+                            transLrc: null,
+                            isPureMusic,
+                        };
+                    },
+                });
                 data.lyricPreferenceSource = currentSettingsLyricSettings.autoUseBestLyric
                     ? currentSettingsLyricSettings.preferredAlternativeLyricSource
                     : null;
@@ -480,7 +514,9 @@ const prefetchSong = async (
     // Measured here because this is where the bytes are cheapest: the track is about to be cached
     // anyway, so with song caching on it is one download feeding both the cache and the analysis,
     // and with it off nothing is fetched at all.
-    analyseForAutomix(song, data.audioUrl);
+    if (!isSmtcSpotify) {
+        analyseForAutomix(song, data.audioUrl);
+    }
 };
 
 export const updatePrefetchedAudioUrl = (

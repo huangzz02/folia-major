@@ -75,6 +75,7 @@ type AppOverlaysAmbient = {
     playerControlSlotSecondary: PlayerControlSlotActionId;
     playerControlSlotContext: SlotContextFromApp;
     onCommitPlayerBottomBarOffset: (offsetPx: number) => void;
+    isSmtcActive?: boolean;
 };
 
 // What only the caller can supply: controller callbacks and values App.tsx computes.
@@ -190,6 +191,7 @@ export const buildAppOverlaysModel = ({
     playerControlSlotSecondary,
     playerControlSlotContext,
     onCommitPlayerBottomBarOffset,
+    isSmtcActive = false,
 }: BuildAppOverlaysModelParams): AppOverlaysModel => ({
     // Gated on stageTrackPillOnScreen (computed in App: display mode plus which page allows the
     // card) rather than on the view directly, so the countdown that feeds the "up next" preview
@@ -316,8 +318,8 @@ export const buildAppOverlaysModel = ({
                     currentTrackKey: getPlaybackSongKey(currentSong),
                     onPrev: handlePrevTrack,
                     onNext: handleNextTrack,
-                    canPrev: neighbors.prev.canGo && !isNowPlayingControlDisabled,
-                    canNext: neighbors.next.canGo && !isNowPlayingControlDisabled,
+                    canPrev: (neighbors.prev.canGo || isSmtcActive) && !isNowPlayingControlDisabled,
+                    canNext: (neighbors.next.canGo || isSmtcActive) && !isNowPlayingControlDisabled,
                     prevTitle: neighbors.prev.title,
                     nextTitle: neighbors.next.title,
                     prevLabel: prevTrackLabel,

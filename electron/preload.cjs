@@ -451,4 +451,16 @@ contextBridge.exposeInMainWorld('electron', {
             return () => ipcRenderer.removeListener('hifi:read', listener);
         },
     },
+    smtc: {
+        isSupported: process.platform === 'win32',
+        getStatus: () => ipcRenderer.invoke('smtc:get-status'),
+        control: (command) => ipcRenderer.invoke('smtc:control', command),
+        playSpotifyUri: (uri) => ipcRenderer.invoke('smtc:play-spotify-uri', uri),
+        fetchLrclib: (query) => ipcRenderer.invoke('smtc:fetch-lrclib', query),
+        onStatusUpdate: (callback) => {
+            const listener = (_event, status) => callback(status);
+            ipcRenderer.on('smtc:status-update', listener);
+            return () => ipcRenderer.removeListener('smtc:status-update', listener);
+        },
+    },
 });

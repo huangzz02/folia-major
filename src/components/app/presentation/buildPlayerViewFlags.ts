@@ -16,6 +16,7 @@ export const buildPlayerViewFlags = ({
     duration,
     playbackRoute,
     hasHifiTrack,
+    isSmtcActive = false,
 }: {
     currentView: string;
     disableHomeDynamicBackground: boolean;
@@ -31,6 +32,8 @@ export const buildPlayerViewFlags = ({
     playbackRoute: PlaybackRoute;
     /** useHifiTrackStore has a current track (loading, ready, or the one mpv still holds). */
     hasHifiTrack: boolean;
+    /** Windows SMTC external Spotify playback route is active (audioSrc is null). */
+    isSmtcActive?: boolean;
 }) => {
     const isPlayerView = currentView === 'player';
     return {
@@ -41,6 +44,7 @@ export const buildPlayerViewFlags = ({
         shouldHidePlayerRightPanelButton: isPlayerView && hidePlayerRightPanelButton,
         canToggleCurrentPlayback: !isNowPlayingControlDisabled && Boolean(
             audioSrc
+            || isSmtcActive
             || (playbackRoute === 'hifi' && hasHifiTrack)
             || (activePlaybackContext === 'stage' && stageActiveEntryKind === 'lyrics' && duration > 0),
         ),

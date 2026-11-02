@@ -23,6 +23,7 @@ const FORMATS: SettingsGroupDef = { id: 'localLyricFormatOrder', titleKey: 'opti
 
 const O = {
     autoBest: option(SOURCE, 'autoUseBestLyric', 'options.autoUseBestLyric'),
+    convertToTraditional: option(SOURCE, 'lyricConvertToTraditional', 'options.lyricConvertToTraditional'),
     matchPriority: option(SOURCE, 'lyricMatchPriority', 'settings.lyricMatchPriority'),
     localPriority: option(SOURCE, 'localLyricsPriority', 'options.localLyricsPriority'),
     globalOffset: option(ADJUST, 'globalLyricTimelineOffset', 'options.globalLyricTimelineOffset'),
@@ -37,11 +38,13 @@ const LyricsPage: React.FC = () => {
     const { onOpenGlobalLyricOffsetSettings, onOpenLyricFilterSettings } = useSettingsPage().viewProps.playback;
     const lyric = useLyricSettingsStore(useShallow(state => ({
         autoBest: state.autoUseBestLyric,
+        convertToTraditional: state.lyricConvertToTraditional,
         preferredSource: state.preferredAlternativeLyricSource,
         localPriority: state.localLyricsPriority,
         formatOrder: state.localLyricFormatOrder,
         globalOffsetMs: state.globalLyricTimelineOffsetMs,
         setAutoBest: state.handleToggleAutoUseBestLyric,
+        setConvertToTraditional: state.handleToggleLyricConvertToTraditional,
         setPreferredSource: state.handleSetPreferredAlternativeLyricSource,
         setLocalPriority: state.handleSetLocalLyricsPriority,
         setFormatOrder: state.handleSetLocalLyricFormatOrder,
@@ -80,6 +83,9 @@ const LyricsPage: React.FC = () => {
             <Group def={SOURCE}>
                 <Row option={O.autoBest} note={t(sources.includes('spotify') ? 'options.autoUseBestLyricDescSpotify' : 'options.autoUseBestLyricDesc')}>
                     <Toggle checked={lyric.autoBest} onChange={lyric.setAutoBest} />
+                </Row>
+                <Row option={O.convertToTraditional} note={t('options.lyricConvertToTraditionalDesc')}>
+                    <Toggle checked={lyric.convertToTraditional} onChange={lyric.setConvertToTraditional} />
                 </Row>
                 <Row option={O.matchPriority} note={t('settings.lyricMatchPriorityDesc')}>
                     <Select

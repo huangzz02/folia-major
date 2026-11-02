@@ -35,6 +35,7 @@ import { subscribeRemoteActions } from '../../../../mods/folium/registries/remot
 import { errorMessage } from '../../../../utils/errorText';
 import { getObservedMedia, hifiMediaShim } from '../../../../services/hifi/hifiMediaShim';
 import { seekHifiRoute } from '../../../hifi/hifiRouteTransport';
+import { isSmtcRouteActive, seekSmtcRoute, useSmtcSpotifyStore } from '../../../../services/smtc/smtcSpotifyStore';
 
 // Bridges Electron-specific shell features without coupling to UI components.
 const DISCORD_PRESENCE_SNAPSHOT_INTERVAL_MS = 1000;
@@ -140,6 +141,7 @@ export const useElectronPlaybackBridge = ({
     const audioSrc = usePlaybackStore(state => state.audioSrc);
     // On the HiFi route the clock and source below are read off the HiFi media shim instead of a deck.
     const playbackRoute = usePlaybackStore(state => state.playbackRoute);
+    const isSmtcActive = useSmtcSpotifyStore(state => state.active);
     const cachedCoverUrl = usePlaybackStore(state => state.cachedCoverUrl);
     const playQueue = usePlaybackStore(state => state.playQueue);
     const isFmMode = usePlaybackStore(state => state.isFmMode);
@@ -239,19 +241,22 @@ export const useElectronPlaybackBridge = ({
         // rest of the time. The metadata below is already the held picture (the caller passes
         // `currentSong`/`duration`/`coverUrl` as the displayed track), so reading the active deck's
         // position here would show the outgoing song's title against the incoming song's clock.
+        const smtcActive = isSmtcRouteActive();
         const audioElement = getObservedMedia(getDisplayAudioElement?.() ?? audioRef.current);
-        const isCurrentAudioSource = isAudioElementUsingCurrentSource();
-        const currentTimeSec = audioElement?.currentTime ?? currentTime.get();
+        const isCurrentAudioSource = !smtcActive && isAudioElementUsingCurrentSource();
+        const currentTimeSec = smtcActive ? currentTime.get() : (audioElement?.currentTime ?? currentTime.get());
         const stagePositionSec = resolveStagePlayerPositionSec({
             activePlaybackContext,
             isExternalPlaybackSourceActive: isNowPlayingStageActive,
-            audioCurrentTimeSec: isCurrentAudioSource ? audioElement?.currentTime : undefined,
+            audioCurrentTimeSec: smtcActive ? currentTime.get() : (isCurrentAudioSource ? audioElement?.currentTime : undefined),
             motionCurrentTimeSec: currentTime.get(),
             syntheticStageLyricsTimeSec: getSyntheticStageLyricsTime?.(),
         });
-        const audioDurationSec = isCurrentAudioSource && Number.isFinite(audioElement?.duration) && (audioElement?.duration ?? 0) > 0
-            ? audioElement?.duration ?? 0
-            : 0;
+        const audioDurationSec = smtcActive
+            ? duration
+            : (isCurrentAudioSource && Number.isFinite(audioElement?.duration) && (audioElement?.duration ?? 0) > 0
+                ? audioElement?.duration ?? 0
+                : 0);
         const stageDurationSec = audioDurationSec > 0 || activePlaybackContext === 'main'
             ? audioDurationSec
             : duration;
@@ -270,6 +275,7 @@ export const useElectronPlaybackBridge = ({
             effectiveLoopMode,
             isFmMode,
             isStageActive: isNowPlayingStageActive,
+            allowExternalSkip: smtcActive,
             controlsDisabled: isNowPlayingControlDisabledRef.current,
             transparentModeEnabled: transparentPlayerBackground,
             mainWindowClickThroughEnabled,
@@ -456,7 +462,7 @@ export const useElectronPlaybackBridge = ({
             console.warn('[Electron] Failed to update Windows taskbar controls', error);
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [currentSong, effectiveLoopMode, isFmMode, isNowPlayingStageActive, playQueue, playbackRoute, playerState]);
+    }, [currentSong, effectiveLoopMode, isFmMode, isNowPlayingStageActive, isSmtcActive, playQueue, playbackRoute, playerState]);
 
     // System/IME voice input pauses playback and resumes it afterwards. Resume only
     // fires when this bridge caused the pause and the track is still paused, so a
@@ -557,7 +563,7 @@ export const useElectronPlaybackBridge = ({
             window.removeEventListener('resize', handleResize);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [cachedCoverUrl, coverUrl, currentSong, duration, effectiveLoopMode, exportState, isDaylight, isFmMode, isNowPlayingStageActive, isPlayerChromeHidden, playerChromeVisibilityMode, lyrics, lyricTimelineOffsetMs, mainWindowClickThroughEnabled, playbackRoute, playbackSyncBridgeStatus, playQueue, playerState, showTransparentWindowBorder, subtitleContentMode, transparentPlayerBackground, isLiked]);
+    }, [cachedCoverUrl, coverUrl, currentSong, duration, effectiveLoopMode, exportState, isDaylight, isFmMode, isNowPlayingStageActive, isPlayerChromeHidden, isSmtcActive, playerChromeVisibilityMode, lyrics, lyricTimelineOffsetMs, mainWindowClickThroughEnabled, playbackRoute, playbackSyncBridgeStatus, playQueue, playerState, showTransparentWindowBorder, subtitleContentMode, transparentPlayerBackground, isLiked]);
 
     useEffect(() => {
         if (!playbackSyncBridgeStatus.discordPresenceEnabled || !window.electron?.publishDiscordPresenceSnapshot) {
@@ -568,7 +574,7 @@ export const useElectronPlaybackBridge = ({
         const intervalId = window.setInterval(publishDiscordPresenceSnapshot, DISCORD_PRESENCE_SNAPSHOT_INTERVAL_MS);
         return () => window.clearInterval(intervalId);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [cachedCoverUrl, coverUrl, currentSong, duration, isNowPlayingStageActive, playbackRoute, playbackSyncBridgeStatus.discordPresenceEnabled, playerState]);
+    }, [cachedCoverUrl, coverUrl, currentSong, duration, isNowPlayingStageActive, isSmtcActive, playbackRoute, playbackSyncBridgeStatus.discordPresenceEnabled, playerState]);
 
     useEffect(() => {
         if (!isStagePlayerSnapshotEnabled || !window.electron?.publishStagePlayerSnapshot) {
@@ -588,7 +594,7 @@ export const useElectronPlaybackBridge = ({
             window.clearInterval(intervalId);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activePlaybackContext, audioSrc, cachedCoverUrl, coverUrl, currentSong, duration, effectiveLoopMode, getSyntheticStageLyricsTime, isFmMode, isNowPlayingStageActive, isStagePlayerSnapshotEnabled, playbackRoute, playQueue, playerState]);
+    }, [activePlaybackContext, audioSrc, cachedCoverUrl, coverUrl, currentSong, duration, effectiveLoopMode, getSyntheticStageLyricsTime, isFmMode, isNowPlayingStageActive, isSmtcActive, isStagePlayerSnapshotEnabled, playbackRoute, playQueue, playerState]);
 
     useEffect(() => {
         if (!window.electron?.onRemoteControlCommand) {
@@ -675,8 +681,8 @@ export const useElectronPlaybackBridge = ({
                 // During a blend the visible track is the outgoing one; route through the same
                 // cancel-and-resume the window's bar uses instead of moving the hidden incoming deck.
                 // mpv seeks on the HiFi route; like the deck's seek below, it leaves a paused track paused.
-                if (seekHifiRoute(nextTime)) {
-                    // Handled: mpv has the song, the deck has no source.
+                if (seekHifiRoute(nextTime) || seekSmtcRoute(nextTime)) {
+                    // Handled: mpv or Spotify.exe has the song, the deck has no source.
                 } else if (onRemoteTransitionSeek?.(nextTime)) {
                     // Handled: the re-play seeks the deck itself once it reloads.
                 } else if (audioElement) {
@@ -749,8 +755,8 @@ export const useElectronPlaybackBridge = ({
                     // INCOMING deck, silent and holding a different track, so moving it moves
                     // nothing the listener can hear. The transition-aware path cancels the blend
                     // back onto the track on screen and seeks that instead.
-                    if (seekHifiRoute(nextTime)) {
-                        // Handled: mpv has the song on the HiFi route.
+                    if (seekHifiRoute(nextTime) || seekSmtcRoute(nextTime)) {
+                        // Handled: mpv or Spotify.exe has the song on the external route.
                     } else if (onRemoteTransitionSeek?.(nextTime)) {
                         // Handled: that path seeks the deck it kept.
                     } else if (audioRef.current) {

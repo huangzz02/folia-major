@@ -21,6 +21,7 @@ import { useBeatFxTrack } from '../../../../hooks/useBeatFxTrack';
 import { readIncomingLyricClock } from './incomingLyricClock';
 import { isBackgroundLyricHeld, setHeldLyricTime, useBackgroundLyricHoldStore } from '../../backgroundThrottling/backgroundLyricHoldStore';
 import { getHifiPosition } from '../../../../services/hifi/hifiPlayback';
+import { getSmtcPositionSec, useSmtcSpotifyStore } from '../../../../services/smtc/smtcSpotifyStore';
 
 // src/components/app/playback/bridges/usePlaybackVisualizerBridge.ts
 
@@ -99,6 +100,7 @@ export function usePlaybackVisualizerBridge({
     const duration = usePlaybackStore(state => state.duration);
     // mpv sounds the song on the HiFi route: the decks are silent, and the clock is extrapolated from mpv's position.
     const isHifiActive = usePlaybackStore(state => state.playbackRoute) === 'hifi';
+    const isSmtcActive = useSmtcSpotifyStore(state => state.active);
     // The lyrics on screen, matching the deck getDisplayElement points at.
     const lyrics = usePlaybackStore(selectDisplayLyrics);
     // The live lyrics, which during a blend are the incoming track's (null until they load).
@@ -241,7 +243,7 @@ export function usePlaybackVisualizerBridge({
         // the track it is finishing, so that clock and picture never describe different songs.
         const audioElement = getDisplayElement?.() ?? audioRef.current;
         // Never on the HiFi route, so the spectrum keeps the idle breath there: there is no analyser on mpv's output.
-        const isActuallyPlaying = !isHifiActive && Boolean(audioElement && !audioElement.paused && !audioElement.ended);
+        const isActuallyPlaying = !isHifiActive && !isSmtcActive && Boolean(audioElement && !audioElement.paused && !audioElement.ended);
         // Mid-handover a deck can be loading while the other one is still sounding. The analyser
         // is downstream of both, so it has real signal: dropping to the idle breath here would put
         // a visible stutter at exactly the moment meant to be seamless.
@@ -299,6 +301,16 @@ export function usePlaybackVisualizerBridge({
             // Every frame, paused or not: the clock stands still while mpv is paused, and a seek while
             // paused moves it. No end handling here - mpv reports the end itself.
             const time = getHifiPosition();
+            currentTime.set(time);
+
+            const effectiveLyricTime = time - displayOffsetMsRef.current / 1000;
+            showLyricTime(effectiveLyricTime);
+
+            if (lyrics) {
+                showLine(findLatestActiveLineIndex(lyrics.lines, effectiveLyricTime));
+            }
+        } else if (isSmtcActive) {
+            const time = getSmtcPositionSec();
             currentTime.set(time);
 
             const effectiveLyricTime = time - displayOffsetMsRef.current / 1000;
@@ -418,6 +430,7 @@ export function usePlaybackVisualizerBridge({
         isTransitionAudible,
         getDisplayElement,
         isHifiActive,
+        isSmtcActive,
     ]);
 
     // Every frame normally; while 后台节流 holds the lyrics, a slow timer that keeps only the clocks. The

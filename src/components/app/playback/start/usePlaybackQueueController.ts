@@ -48,8 +48,21 @@ import { buildStagePlayerSnapshot, resolveStagePlayerQueueItemIndex } from '../.
 import type { LocalLibraryDisplayCatalog } from '../../../../services/playbackAdapters';
 import type { SearchKind, SearchReturnView, SearchSource } from '../../../../stores/useSearchNavigationStore';
 import { dispatchSearchTrackAction } from '../../search/searchTrackActions';
-import { playbackFade } from '../../../../services/playbackFade';
-import { getProviderSongMetadata } from '../../../../services/onlineMusic/songMetadata';
+import { markProgrammaticPause, playbackFade } from '../../../../services/playbackFade';
+import { getProviderSongMetadata, getSongAlbumLabel, getSongArtistLabel, getSongCoverUrl } from '../../../../services/onlineMusic/songMetadata';
+import { loadSmtcAndSpotifyLyrics } from '../../../../services/smtc/smtcLyricsMatcher';
+import {
+    activateFoliaSpotifyTrack,
+    deactivateSmtc,
+    isSmtcRouteActive,
+    isSmtcSpotifySupported,
+    isSpotifyPremiumAccount,
+    smtcNext,
+    smtcPause,
+    smtcPrevious,
+    useSmtcSpotifyStore,
+} from '../../../../services/smtc/smtcSpotifyStore';
+import { toSafeRemoteUrl } from '../../../../utils/appPlaybackHelpers';
 import { setStatusMessage as setStatusMsg } from '../../../../stores/useStatusMessageStore';
 import { setAudioSrc, setCachedCoverUrl, setCurrentLineIndex, setCurrentSong, setDuration, setIsFmMode, setPlayQueue, setPlayerState, startLoadingToPlay, usePlaybackStore } from '../../../../stores/usePlaybackStore';
 import { askedSongKeyRef, askForSong, keepSongsOfProvidersStanding, playsDroppedSoFar, providerDropsSoFar, providerPlaysDroppedSoFar, showSong, startOfAskedSong, startPlay, withdrawAsk } from '../currentSong';
@@ -180,6 +193,7 @@ const isPassingFailure = (shown: OnlineFailure) => (
 const pauseWhatIsSounding = (audio: HTMLAudioElement | null) => {
     audio?.pause();
     if (isHifiRoute()) void hifiTransport.pause();
+    if (isSmtcRouteActive()) void smtcPause();
 };
 
 // A sign-in that has run out comes with the button that opens the sign-in window for that platform.
@@ -851,6 +865,142 @@ export function usePlaybackQueueController({
 
         prefetched = getPrefetchedData(song, audioQuality);
 
+        // Fallback to local Spotify.exe + SMTC on Windows when user does not have an active Spotify Premium session in Folia
+        const isPremium = await isSpotifyPremiumAccount().catch(() => false);
+        if (providerId === 'spotify' && isSmtcSpotifySupported() && !isPremium) {
+            const songKey = getPlaybackSongKey(song);
+            const resolvedSong = song;
+            const resolvedQueue = replacePlaybackSongInQueue(newQueue, resolvedSong);
+            askForSong(song);
+            const askedStart = startOfAskedSong();
+
+            clearPendingUnavailableSkip();
+            setStatusMsg(prev => prev?.persistent ? null : prev);
+            fmModeBeforePendingPlayRef.current = null;
+
+            if (audioRef.current) markProgrammaticPause(audioRef.current);
+            audioRef.current?.pause();
+            if (isHifiRoute()) void hifiTransport.pause();
+
+            shouldAutoPlayRef.current = false;
+            pendingResumeTimeRef.current = null;
+            lastAudioRecoverySourceRef.current = null;
+            currentOnlineAudioUrlFetchedAtRef.current = null;
+            setLyrics(null);
+            setCurrentLineIndex(-1);
+            currentTime.set(0);
+            setDuration(Math.max(0, (resolvedSong.durationMs || 0) / 1000));
+            showSong(resolvedSong);
+
+            const immediateRemoteCover = toSafeRemoteUrl(getSongCoverUrl(resolvedSong));
+            setCachedCoverUrl(immediateRemoteCover ?? prefetched?.coverUrl ?? null);
+            setAudioSrc(null);
+            setIsLyricsLoading(true);
+
+            retireBlobUrl(blobUrlRef.current);
+            blobUrlRef.current = null;
+
+            let landedQueue = resolvedQueue;
+            if (queueRewritten()) {
+                const live = usePlaybackStore.getState().playQueue;
+                const swapped = replacePlaybackSongWhereQueued(live, resolvedSong);
+                if ((queue.length > 0 || playQueue.length === 0) && swapped) {
+                    setPlayQueue(swapped);
+                }
+                landedQueue = swapped ?? live;
+            } else if (queue.length > 0 || playQueue.length === 0) {
+                setPlayQueue(resolvedQueue);
+            }
+
+            void persistLastPlaybackCache(resolvedSong, landedQueue);
+
+            // Navigate to player view immediately so user sees NowPlaying screen without delay
+            if (shouldNavigateToPlayer) {
+                navigateToPlaybackView();
+            }
+
+            setPlayerState(PlayerState.PLAYING);
+            void activateFoliaSpotifyTrack(resolvedSong);
+
+            // Fetch stored lyrics state in background without blocking playback transition
+            void loadOnlineLyricsState(song).then(onlineLyricsState => {
+                if (onlineLyricsState && askedSongKeyRef.current === songKey) {
+                    setCurrentSong(prev => {
+                        if (!prev || getPlaybackSongKey(prev) !== songKey) return prev;
+                        return { ...prev, onlineLyricsState };
+                    });
+                }
+            });
+
+            const cachedCoverUrl = await getCachedSongCoverUrl(song);
+            if (askedSongKeyRef.current !== songKey || startOfAskedSong() !== askedStart) {
+                return;
+            }
+            if (cachedCoverUrl) {
+                setCachedCoverUrl(cachedCoverUrl);
+            } else if (immediateRemoteCover) {
+                setCachedCoverUrl(immediateRemoteCover);
+            } else if (prefetched?.coverUrl) {
+                setCachedCoverUrl(prefetched.coverUrl);
+            }
+
+            try {
+                if (prefetched?.lyrics && prefetched.lyrics.lines.length > 0) {
+                    setLyrics(prefetched.lyrics);
+                    setIsLyricsLoading(false);
+                }
+                await loadSmtcAndSpotifyLyrics({
+                    song: resolvedSong,
+                    title: resolvedSong.name,
+                    artist: getSongArtistLabel(resolvedSong),
+                    album: getSongAlbumLabel(resolvedSong),
+                    durationMs: resolvedSong.durationMs || 0,
+                    isCurrent: () => askedSongKeyRef.current === songKey,
+                    onLyrics: resolvedLyrics => setLyrics(resolvedLyrics),
+                    onPureMusicChange: isPureMusic => {
+                        setCurrentSong(prev => {
+                            if (!prev || !isSamePlaybackSong(prev, song)) return prev;
+                            return { ...prev, isPureMusic };
+                        });
+                    },
+                    onStateChange: state => {
+                        setCurrentSong(prev => {
+                            if (!prev || !isSamePlaybackSong(prev, song)) return prev;
+                            return { ...prev, onlineLyricsState: state ?? undefined };
+                        });
+                    },
+                    onDone: () => setIsLyricsLoading(false),
+                });
+                if (askedSongKeyRef.current === songKey) {
+                    supplyLyricsAfterEmptyLoad();
+                }
+            } catch (error) {
+                console.warn('[App] SMTC Spotify lyric fetch failed', error);
+                setLyrics(null);
+                setIsLyricsLoading(false);
+                if (askedSongKeyRef.current === songKey) {
+                    supplyLyricsAfterEmptyLoad();
+                }
+            }
+
+            try {
+                await restoreCachedThemeForSong(song);
+                if (askedSongKeyRef.current !== songKey) return;
+            } catch (error) {
+                console.warn('Theme load error', error);
+            }
+
+            if (queueRewritten()) {
+                const live = usePlaybackStore.getState().playQueue;
+                if (live.length > 0) {
+                    void prefetchNearbySongs(resolvedSong, live, audioQuality, userId);
+                }
+            } else if (newQueue.length > 0) {
+                void prefetchNearbySongs(resolvedSong, resolvedQueue, audioQuality, userId);
+            }
+            return;
+        }
+
         const hasImmediatePrefetchedAudio = Boolean(
             prefetched?.audioUrl &&
             prefetched.audioUrl !== 'CACHED_IN_DB'
@@ -931,6 +1081,7 @@ export function usePlaybackQueueController({
 
         // Written only now: a play that gave up above leaves the intent to play, the time to resume
         // at and the address's fetch time to the song the key went back to.
+        deactivateSmtc({ pauseExternal: true });
         shouldAutoPlayRef.current = true;
         pendingResumeTimeRef.current = null;
         lastAudioRecoverySourceRef.current = null;
@@ -1224,6 +1375,10 @@ export function usePlaybackQueueController({
 
     const handleNextTrack = useCallback(async (options?: NextTrackOptions) => {
         if (isNowPlayingStageActive) return;
+        if (isSmtcRouteActive() && useSmtcSpotifyStore.getState().isExternalTrack && !options?.allowStopOnMissing) {
+            void smtcNext();
+            return;
+        }
         // The FM top-up below waits for the radio: a whole-queue write during that wait has ended FM.
         const queueWritesAtStart = wholeQueueWritesSoFar();
 
@@ -1237,6 +1392,10 @@ export function usePlaybackQueueController({
         // A step from a song that never became current (the skip after a first play failed, once the
         // queue was replaced whole) names it in `fromSong`, and needs no current song to step from.
         if ((!currentSong && !options?.fromSong) || playQueue.length === 0) {
+            if (isSmtcRouteActive() && !options?.allowStopOnMissing) {
+                void smtcNext();
+                return;
+            }
             if (options?.allowStopOnMissing) {
                 stopAtQueueEnd();
             }
@@ -1339,6 +1498,8 @@ export function usePlaybackQueueController({
                 unavailableSkipCount: options?.unavailableSkipCount,
                 isAutomixAdvance: options?.isAutomixAdvance,
             });
+        } else if (isSmtcRouteActive() && !options?.allowStopOnMissing) {
+            void smtcNext();
         } else if (options?.allowStopOnMissing) {
             stopAtQueueEnd();
         }
@@ -1346,7 +1507,16 @@ export function usePlaybackQueueController({
 
     const handlePrevTrack = useCallback(() => {
         if (isNowPlayingStageActive) return;
-        if (!currentSong || playQueue.length === 0) return;
+        if (isSmtcRouteActive() && useSmtcSpotifyStore.getState().isExternalTrack) {
+            void smtcPrevious();
+            return;
+        }
+        if (!currentSong || playQueue.length === 0) {
+            if (isSmtcRouteActive()) {
+                void smtcPrevious();
+            }
+            return;
+        }
 
         // Same as handleNextTrack, and more visibly wrong without it: stepping back from the track
         // a blend has already advanced to lands on the one the listener is hearing, so "previous"
@@ -1361,6 +1531,8 @@ export function usePlaybackQueueController({
             void playSong(playQueue[prevIndex], playQueue, isFmMode, {
                 shouldNavigateToPlayer: shouldNavigateToPlayerOnTrackChange,
             });
+        } else if (isSmtcRouteActive()) {
+            void smtcPrevious();
         }
     }, [currentSong, endHeldTransition, getDisplaySong, isFmMode, isNowPlayingStageActive, loopMode, playQueue, playSong, shouldNavigateToPlayerOnTrackChange]);
 

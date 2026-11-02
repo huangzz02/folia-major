@@ -57,6 +57,7 @@ export interface BuildPlaybackSyncBridgeModelArgs {
     effectiveLoopMode: 'off' | 'all' | 'one';
     isFmMode: boolean;
     isStageActive: boolean;
+    allowExternalSkip?: boolean;
     controlsDisabled: boolean;
     transparentModeEnabled: boolean;
     mainWindowClickThroughEnabled: boolean;
@@ -118,6 +119,7 @@ export const buildPlaybackSyncBridgeModel = ({
     effectiveLoopMode,
     isFmMode,
     isStageActive,
+    allowExternalSkip = false,
     controlsDisabled,
     transparentModeEnabled,
     mainWindowClickThroughEnabled,
@@ -161,8 +163,8 @@ export const buildPlaybackSyncBridgeModel = ({
         playerState,
         loopMode: effectiveLoopMode,
         isFmMode,
-        canGoPrevious: neighbors.prev.canGo,
-        canGoNext: neighbors.next.canGo,
+        canGoPrevious: neighbors.prev.canGo || Boolean(allowExternalSkip && hasTrack),
+        canGoNext: neighbors.next.canGo || Boolean(allowExternalSkip && hasTrack),
         controlsDisabled: controlsDisabled || !hasTrack,
         isStageActive,
         transparentModeEnabled,
