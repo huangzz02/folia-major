@@ -7,6 +7,7 @@ import { hifiTransport, isHifiRoute } from '../../../../services/hifi/hifiPlayba
 import { getCachedSongCoverUrl } from '../../../../services/onlineMusic/resourceCache';
 import { getSongAlbumLabel, getSongArtistLabel, getSongCoverUrl } from '../../../../services/onlineMusic/songMetadata';
 import { loadSmtcAndSpotifyLyrics } from '../../../../services/smtc/smtcLyricsMatcher';
+import { currentTime } from '../../../../stores/motionSignals';
 import {
     activateFoliaSpotifyTrack,
     buildSmtcTrackKey,
@@ -262,6 +263,10 @@ export function useSmtcSpotifyBridge({
                 if (doesSmtcTitleArtistMatch(status.title, status.artist, pending.title, pending.artist)) {
                     if (status.isPlaying) {
                         clearPendingRequestedSmtcTrack();
+                        const startSec = Math.max(0, status.position / 1000);
+                        const durSec = status.duration > 0 ? status.duration / 1000 : liveStore.duration;
+                        syncSmtcClockAnchor(startSec, durSec, true, { forceSnap: true });
+                        currentTime.set(startSec);
                     }
                 } else {
                     // Still receiving the old track's last tick while Spotify switches URIs; ignore it

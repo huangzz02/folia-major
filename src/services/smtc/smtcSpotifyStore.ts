@@ -180,13 +180,22 @@ export const syncSmtcClockAnchor = (
     const currentPos = getSmtcPositionSec();
     const delta = safePos - currentPos;
 
-    // Prevent small backward jitter (< 480ms) from Windows SMTC timeline quantization while playing smoothly
-    if (!options?.forceSnap && isPlaying && anchorIsPlaying && delta < 0 && delta > -0.48) {
-        anchorPositionSec = currentPos;
-    } else {
-        anchorPositionSec = anchorDurationSec > 0 ? Math.min(safePos, anchorDurationSec) : safePos;
+    if (!options?.forceSnap && isPlaying && anchorIsPlaying) {
+        // If discrepancy is under 80ms, it's sub-perceptual jitter; maintain smooth extrapolation
+        if (Math.abs(delta) < 0.08) {
+            return;
+        }
+        // If discrepancy is small (80ms ~ 500ms), gently converge anchor toward safePos
+        // rather than locking in a permanent offset
+        if (Math.abs(delta) <= 0.50) {
+            anchorPositionSec = currentPos + delta * 0.5;
+            anchorPerfMs = perf;
+            anchorIsPlaying = true;
+            return;
+        }
     }
 
+    anchorPositionSec = anchorDurationSec > 0 ? Math.min(safePos, anchorDurationSec) : safePos;
     anchorPerfMs = perf;
     anchorIsPlaying = isPlaying;
 };
@@ -234,7 +243,7 @@ export const activateFoliaSpotifyTrack = async (song: SongResult): Promise<boole
         expiresAtMs: Date.now() + 6500,
     };
     seekGuardUntilPerfMs = 0;
-    syncSmtcClockAnchor(0, durationSec, true, { forceSnap: true });
+    syncSmtcClockAnchor(0, durationSec, false, { forceSnap: true });
     currentTime.set(0);
 
     useSmtcSpotifyStore.setState({
