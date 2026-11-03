@@ -32,34 +32,33 @@ Lyrics Reimagined // 辞曲新境
 </div>
 
 > [!NOTE]
-> ### Folia (Spotify Free & 繁體中文動態歌詞增強版)
+> ### Folia (Windows 原生 SMTC 媒體監聽 & 繁體中文動態歌詞增強版)
 > 本專案為 [chthollyphile/folia-major](https://github.com/chthollyphile/folia-major) 的個人優化分支。
 >
 > #### 主要特性
-> 1. **Spotify 雙模智能切換 (Premium 原生串流 / Free 本地無縫接管)**：
+> 1. **Spotify 雙模智能切換 (Premium 原生串流 / Free 本地 SMTC 安全伴侶)**：
 >    - **Premium 付費用戶**：維持原版 Librespot 官方解碼串流，享最高音質與完整內建音效處理。
->    - **Free 免費用戶**：解除帳號門檻限制，在 Windows 桌面端直接由本地 Spotify.exe + SMTC 接管，免填帳密即可點歌、換曲與雙向狀態同步。
+>    - **Free 免費用戶**：解除帳號門檻限制，透過 Windows 官方系統媒體傳輸控制（SMTC）純被動安全同步，免填帳密、不觸碰帳號 Token、不修改客戶端，即可享有沉浸式全屏動態歌詞體驗。
 > 2. **繁體中文動態歌詞精準匹配**：針對台灣與繁體中文語境優化，解決外文或繁體歌曲無法正常獲取全屏動態歌詞的問題。
-> 3. **推薦搭配 SpotX**：Windows 端的 Spotify 免費用戶強烈建議搭配安裝 [SpotX](https://github.com/SpotX-Official/SpotX) 去除音訊與視覺廣告，搭配本版本可獲得等同付費會員的無縫聽歌體驗。
+> 3. **綠色純淨安全設計**：100% 採用微軟官方 UWP / WinRT SMTC API 進行播放狀態監聽與標準播放控制，零底層注入、零跨進程鍵盤模擬、不修改 Spotify 核心檔案，保護帳號安全無虞。
 >
 > ---
 >
 > #### 實作原理與技術架構
 >
-> **1. Spotify 雙模自適應播放架構**
-> - **憑證預檢與無感 Fallback**：點播曲目時先探測本地是否存在有效 Spotify Premium 會員憑證；若無則自動降級由 SMTC 橋接層接管，無感切換。
-> - **非侵入式背景指令傳遞**：捨棄易崩潰且受權限限制的 UI Automation，改以 C# 封裝輕量 Win32 消息機制。透過 `WM_ACTIVATE` 與鍵盤虛擬碼（`VK_RETURN`）在毫秒級內直接將換曲指令送至 Spotify 背景進程，不搶佔使用者當前工作視窗的鍵盤滑鼠焦點。
-> - **播放狀態與時間軸雙向對齊**：監聽 Windows 系統媒體傳輸控制（System Media Transport Controls, SMTC），精確追蹤播放位置與狀態；並設計切換過渡期狀態鎖，確保換曲時介面不會發生跳幀或狀態誤判。
+> **1. Windows 原生 SMTC 安全媒體監聽**
+> - **微軟標準 UWP / WinRT API**：採用 `GlobalSystemMediaTransportControlsSessionManager` 監聽播放狀態、歌曲資訊與進度軸，完全不侵入外部播放器進程。
+> - **無感歌詞時鐘對齊**：透過 SMTC 時間軸即時修正本機歌詞渲染時鐘，在不影響系統效能的前提下實現平滑順暢的逐字動態歌詞滾動。
 >
 > **2. 繁體中文與多來源歌詞匹配機制**
 > - **字詞正規化與繁簡自動轉換**：在查詢歌詞前，先經由純本地繁簡轉換引擎將曲目標題與演出者標準化，並過濾 `(Remastered)`、`feat.`、現場版等干擾匹配的後綴標籤。
-> - **跨平台歌詞搜尋**：以正規化後的標籤自動對齊網易雲與酷狗歌詞庫，自動抓取逐字/逐句時間軸動態歌詞，呈現完整全屏滾動特效。
+> - **跨平台歌詞搜尋**：以標準化後的標籤自動對齊 LRCLIB、網易雲與酷狗歌詞庫，自動抓取逐字/逐句時間軸動態歌詞，呈現完整全屏滾動特效。
 >
 > ---
 >
 > #### 支援平台與未來規劃 (Roadmap)
-> - **Windows (10 / 11 64-bit)**：已完整支援 (Win32 IPC + SMTC)。
-> - **macOS**：規劃中 (預計透過官方 AppleScript / `osascript` 接口實現原生零焦點換曲與狀態追蹤)。
+> - **Windows (10 / 11 64-bit)**：已完整支援 (Windows 原生 SMTC 媒體監聽)。
+> - **macOS**：規劃中 (預計透過官方 AppleScript / `osascript` 接口實現原生狀態追蹤)。
 > - **Linux**：規劃中 (預計透過標準 MPRIS2 D-Bus 通訊協議對齊本地客戶端)。
 
 ## 项目简介
